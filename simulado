@@ -1,0 +1,491 @@
+# Criar um pod com um volume não persistente.
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.14.2
+    ports:
+    - containerPort: 80
+    emptyDir: {}
+    
+ # Criar um service/ep apontando para um pod.
+
+k expose pod <nomepod>  --name <svc-name> --port 
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    app.kubernetes.io/name: proxy
+spec:
+  containers:
+  - name: nginx
+    image: nginx:stable
+    ports:
+      - containerPort: 80
+        name: http-web-svc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  selector:
+    app.kubernetes.io/name: proxy
+  ports:
+  - name: name-of-service-port
+    protocol: TCP
+    port: 80
+    targetPort: http-web-svc
+    
+# Colocar um node para que não execute nenhum containers.
+
+k taint node <nomenode> key:value=NoExecute
+kubectl taint nodes node1 key1=value1:NoSchedule
+kubectl taint nodes node1 key1=value1:NoSchedule-
+
+#Criar um PV Hostpath.
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv0003
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: slow
+  hostPath:
+    path: /path
+    
+# Criar um initcontainer para executar uma tarefa necessária para a subida do container principal.
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app.kubernetes.io/name: MyApp
+spec:
+  containers:
+  - name: myapp-container
+    image: busybox:1.28
+    command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+  initContainers:
+  - name: init-myservice
+    image: busybox:1.28
+    command: ['sh', '-c', "until nslookup myservice.$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace).svc.cluster.local; do echo waiting for myservice; sleep 2; done"]
+  - name: init-mydb
+    image: busybox:1.28
+    command: ['sh', '-c', "until nslookup mydb.$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace).svc.cluster.local; do echo waiting for mydb; sleep 2; done"]
+    
+ # Criar um daemonset.
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluentd-elasticsearch
+  namespace: kube-system
+  labels:
+    k8s-app: fluentd-logging
+spec:
+  selector:
+    matchLabels:
+      name: fluentd-elasticsearch
+  template:
+    metadata:
+      labels:
+        name: fluentd-elasticsearch
+    spec:
+      tolerations:
+      # these tolerations are to have the daemonset runnable on control plane nodes
+      # remove them if your control plane nodes should not run pods
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: fluentd-elasticsearch
+        image: quay.io/fluentd_elasticsearch/fluentd:v2.5.2
+        resources:
+          limits:
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+        volumeMounts:
+        - name: varlog
+          mountPath: /var/log
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log
+
+
+# Criar um deployment do nginx com 5 réplicas.
+k create deploy <nome> --image nginx --replicas 5
+
+# Ver quais os pods que mais estão consumindo cpu através do kubectl top.
+k top node
+k top pod
+
+# Organizar a saída do comando "kubectl get pods" pelo tamanho do capacity storage.
+
+k get deploy  --sort-by=spec.capacity.storage
+kubectl get pod --sort-by=.spec.capacity.storage
+
+# Qual a quantidade de nodes que estão aceitando novos containers
+k get nodes -o wide
+
+# Criar um secret e dois pods, um montando o secret em filesystem e outro como variável
+
+kubectl create secret generic prod-db-secret --from-literal=username=produser --from-literal=password=Y4nys7f11
+
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dotfile-secret
+data:
+  .secret-file: dmFsdWUtMg0KDQo=
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secret-dotfiles-pod
+spec:
+  volumes:
+  - name: secret-volume
+    secret:
+      secretName: dotfile-secret
+  containers:
+  - name: dotfile-test-container
+    image: registry.k8s.io/busybox
+    command:
+    - ls
+    - "-l"
+    - "/etc/secret-volume"
+    volumeMounts:
+    - name: secret-volume
+      readOnly: true
+      mountPath: "/etc/secret-volume"
+ ----
+ apiVersion: v1
+  
+kind: Pod
+  
+metadata:
+  
+  name: env-single-secret
+  
+spec:
+  
+  containers:
+  
+  - name: envars-test-container
+  
+    image: nginx
+  
+    env:
+  
+    - name: SECRET_USERNAME
+  
+      valueFrom:
+  
+        secretKeyRef:
+  
+          name: backend-user
+  
+          key: backend-username
+          
+# Fazer a instalação do nginx em determinada versão, atualizar e depois realizar o rollback com o --record.
+k rollback undo deploy <nome>  --record
+k create deploy  nginx --image nginx:1
+k set image  deploy nginx=nginx:2
+
+# EXTRA - Realizar o backup do etcd.
+
+ETCDCTL_API=3 etcdctl --endpoints=https://127.0.0.1:2379 \
+  --cacert=<trusted-ca-file> --cert=<cert-file> --key=<key-file> \
+  snapshot save <backup-file-location>
+  
+ # Identificar quais pods fazem parte de determinado services.
+
+# Usar o nslookup e/ou outras ferramentas para pegar o dns do pod e do service.
+ k exec -it nslookup 
+ kubectl exec -i -t dnsutils -- nslookup kubernetes.default
+
+ # verifica se o svc esta ok
+ kubectl get svc --namespace=kube-system
+ 
+ #Adicionar um label no node.
+k label node <nome> key=value
+
+# Subir um pod com afinidade de node.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: with-node-affinity
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: topology.kubernetes.io/zone
+            operator: In
+            values:
+            - antarctica-east1
+            - antarctica-west1
+  containers:
+  - name: with-node-affinity
+    image: registry.k8s.io/pause:2.0
+    
+# Ajustar o nome de uma imagem com nome errado de um deployment
+k edit deploy
+editar e salvar/ sair
+
+# Criar um cronjob.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hello
+spec:
+  schedule: "* * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: hello
+            image: busybox:1.28
+            imagePullPolicy: IfNotPresent
+            command:
+            - /bin/sh
+            - -c
+            - date; echo Hello from the Kubernetes cluster
+          restartPolicy: OnFailure
+          
+ # Criar Pod com o parametro containerport.
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.14.2
+    ports:
+    - containerPort: 80
+    
+# Declarar a variável NGINX_PORT no env do container.
+ 
+ apiVersion: v1
+kind: Pod
+metadata:
+  name: envar-demo
+  labels:
+    purpose: demonstrate-envars
+spec:
+  containers:
+  - name: envar-demo-container
+    image: gcr.io/google-samples/node-hello:1.0
+    env:
+    - name: NGINX_PORT 
+      value: "Hello from the environment"
+      
+ # Declarar a variável na configmap e passar para container.
+k create cm 
+kubectl create configmap <map-name> <data-source>
+ ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  creationTimestamp: 2022-02-18T18:52:05Z
+  name: game-config
+  namespace: default
+  resourceVersion: "516"
+  uid: b4952dc3-d670-11e5-8cd0-68f728db1985
+data:
+  game.properties: |
+  
+  ---
+  
+apiVersion: v1
+   
+kind: Pod
+   
+metadata:
+   
+  name: dapi-test-pod
+   
+spec:
+   
+  containers:
+   
+    - name: test-container
+   
+      image: registry.k8s.io/busybox
+   
+      command: [ "/bin/sh", "-c", "env" ]
+   
+      env:
+   
+        # Define the environment variable
+   
+        - name: SPECIAL_LEVEL_KEY
+   
+          valueFrom:
+   
+            configMapKeyRef:
+   
+              # The ConfigMap containing the value you want to assign to SPECIAL_LEVEL_KEY
+   
+              name: special-config
+   
+              # Specify the key associated with the value
+   
+              key: special.how
+   
+  restartPolicy: Never
+  
+  # Declarar a variável no secret e passar para o container.
+  
+  apiVersion: v1
+   
+kind: Pod
+   
+metadata:
+   
+  name: dapi-test-pod
+   
+spec:
+   
+  containers:
+   
+    - name: test-container
+   
+      image: registry.k8s.io/busybox
+   
+      command: [ "/bin/sh", "-c", "env" ]
+   
+      env:
+   
+        # Define the environment variable
+   
+        - name: SPECIAL_LEVEL_KEY
+   
+          valueFrom:
+   
+            SecretKeyRef:
+   
+              # The secret containing the value you want to assign to SPECIAL_LEVEL_KEY
+   
+              name: special-config
+   
+              # Specify the key associated with the value
+   
+              key: special.how
+   
+  restartPolicy: Never
+
+  # Configurar resources limits no deployment.
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: frontend
+spec:
+  containers:
+  - name: app
+    image: images.my-company.example/app:v4
+    resources:
+      #requests:
+        #memory: "64Mi"
+        #cpu: "250m"
+      limits:
+        memory: "128Mi"
+        cpu: "500m"
+        
+  # Configurar liveness e readiness no deployment.
+
+apiVersion: v1
+kind: Deployment
+metadata:
+  name: goproxy
+  labels:
+    app: goproxy
+spec:
+  containers:
+  - name: goproxy
+    image: registry.k8s.io/goproxy:0.1
+    ports:
+    - containerPort: 8080
+    readinessProbe:
+      tcpSocket:
+        port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    livenessProbe:
+      tcpSocket:
+        port: 8080
+      initialDelaySeconds: 15
+      periodSeconds: 20
+      
+ #     Criar um volume Emptydir e compartilhar entre 2 containers.
+
+# Customizar o parâmetro command do container.
+
+# Configurar um nodeselector para o Pod.
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+  nodeName: kube-01
+  
+  # Executar o kubectl rollback pause e resume.
+k rollback pause 
+k rollback resume
+
+# Utilizar o edit ou outro comando para corrigir o selector de um service para que ele funcione corretamente.
+
+k edit svc nomesvc
+editar salvar
+
+#Criar uma secret generic, outra from file e outra literal.
+k create secret generic --from-literal 
+k create secret opaque 
+kubectl create secret generic ssh-key-secret --from-file=ssh-privatekey=/path/to/.ssh/id_rsa --from-file=ssh-publickey=/path/to/.ssh/id_rsa.pub
+kubectl create secret generic empty-secret
+
+#Criar um configmap generic, outro from file e outro literal.
+k create cm  --from-literal=
+k create cm  <nome> <datasource>
+
+#Verifique a saúde de todos os nodes e seus componentes, como kubelet, proxy, api, controllers, schedullers, etc.
+
+    
+    
+
+
+      
+      
